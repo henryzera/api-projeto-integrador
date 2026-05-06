@@ -3,14 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-require("dotenv/config");
 const app_1 = __importDefault(require("./app"));
+const env_1 = require("./config/env");
 const mongo_1 = require("./database/mongo");
-const PORT = process.env.PORT || 3000;
+const user_repository_1 = require("./repositories/user.repository");
 async function startServer() {
     await (0, mongo_1.connectMongo)();
-    app_1.default.listen(PORT, () => {
-        console.log(`Server running on port ${PORT}`);
+    await (0, user_repository_1.ensureUserIndexes)();
+    app_1.default.listen(env_1.env.PORT, () => {
+        console.log(`Server running on port ${env_1.env.PORT}`);
         console.log('MongoDB connected');
     });
 }

@@ -1,29 +1,16 @@
-import 'dotenv/config';
-
 import { Collection, Db, Document, MongoClient, ServerApiVersion } from 'mongodb';
+
+import { env } from '../config/env';
 
 let client: MongoClient | null = null;
 let database: Db | null = null;
-
-function getRequiredEnv(name: string): string {
-  const value = process.env[name];
-
-  if (!value) {
-    throw new Error(`Environment variable ${name} is required`);
-  }
-
-  return value;
-}
 
 export async function connectMongo(): Promise<Db> {
   if (database) {
     return database;
   }
 
-  const uri = getRequiredEnv('MONGO_URI');
-  const dbName = getRequiredEnv('MONGO_DB_NAME');
-
-  const mongoClient = new MongoClient(uri, {
+  const mongoClient = new MongoClient(env.MONGO_URI, {
     serverSelectionTimeoutMS: 5000,
     serverApi: {
       version: ServerApiVersion.v1,
@@ -35,18 +22,17 @@ export async function connectMongo(): Promise<Db> {
   await mongoClient.connect();
 
   client = mongoClient;
-  database = mongoClient.db(dbName);
+  database = mongoClient.db(env.MONGO_DB_NAME);
 
   return database;
 }
 
 export async function getMongoCollection<TSchema extends Document = Document>(
-  collectionName = process.env.MONGO_COLLECTION
+  collectionName = env.MONGO_COLLECTION
 ): Promise<Collection<TSchema>> {
   const db = await connectMongo();
-  const name = collectionName || getRequiredEnv('MONGO_COLLECTION');
 
-  return db.collection<TSchema>(name);
+  return db.collection<TSchema>(collectionName);
 }
 
 export async function closeMongo(): Promise<void> {

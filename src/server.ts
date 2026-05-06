@@ -1,15 +1,14 @@
-import 'dotenv/config';
-
 import app from './app';
+import { env } from './config/env';
 import { connectMongo } from './database/mongo';
-
-const PORT = process.env.PORT || 3000;
+import { ensureUserIndexes } from './repositories/user.repository';
 
 async function startServer() {
   await connectMongo();
+  await ensureUserIndexes();
 
-  app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+  app.listen(env.PORT, () => {
+    console.log(`Server running on port ${env.PORT}`);
     console.log('MongoDB connected');
   });
 }
