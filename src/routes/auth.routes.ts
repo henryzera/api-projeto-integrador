@@ -1,6 +1,7 @@
 import { Router } from 'express';
 
-import { loginController, registerController } from '../controllers/auth.controller';
+import { loginController, logoutController, registerController } from '../controllers/auth.controller';
+import { requireAuth } from '../middlewares/auth.middleware';
 import { createRateLimiter } from '../middlewares/rateLimiter';
 import { validateRequest } from '../middlewares/validateRequest';
 import { loginSchema, registerSchema } from '../schemas/auth.schemas';
@@ -15,5 +16,6 @@ const authLimiter = createRateLimiter({
 
 router.post('/register', authLimiter, validateRequest({ body: registerSchema }), asyncHandler(registerController));
 router.post('/login', authLimiter, validateRequest({ body: loginSchema }), asyncHandler(loginController));
+router.post('/logout', requireAuth, asyncHandler(logoutController));
 
 export default router;

@@ -60,6 +60,7 @@ Rotas autenticadas:
 
 ```http
 GET /me
+POST /auth/logout
 GET /contratacoes?limit=5
 GET /contratacoes/:id
 ```
@@ -118,6 +119,21 @@ O login aceita email ou CNPJ no campo `identifier`.
 }
 ```
 
+## Logout
+
+O logout invalida o JWT atual no backend ate a expiracao original do token.
+
+```http
+POST /auth/logout
+Authorization: Bearer <token>
+```
+
+Response:
+
+```http
+204 No Content
+```
+
 ## Validacoes e seguranca
 
 A API nao confia nos dados enviados pelo front. As protecoes aplicadas foram:
@@ -127,6 +143,7 @@ A API nao confia nos dados enviados pelo front. As protecoes aplicadas foram:
 - Hash de senha com `bcryptjs`, usando 12 rounds.
 - JWT assinado com `JWT_SECRET`, `issuer`, `audience` e expiracao.
 - Middleware `requireAuth` exigindo `Bearer token`.
+- Revogacao de JWT no logout usando `jti` e colecao Mongo com TTL.
 - Usuario publico sem `passwordHash` nas respostas.
 - Indices unicos em `emailNormalized` e `cnpj`.
 - `helmet` para headers HTTP de seguranca.
@@ -146,6 +163,7 @@ MONGO_URI=mongodb+srv://<usuario>:<senha>@<cluster>.mongodb.net/?appName=<app>
 MONGO_DB_NAME=ETL
 MONGO_COLLECTION=contratacoes_brutas
 MONGO_USERS_COLLECTION=users
+MONGO_REVOKED_TOKENS_COLLECTION=revoked_tokens
 JWT_SECRET=<gere-um-segredo-com-pelo-menos-32-caracteres>
 JWT_EXPIRES_IN=1h
 JWT_ISSUER=api-projeto-integrador

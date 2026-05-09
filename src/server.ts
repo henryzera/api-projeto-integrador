@@ -3,6 +3,7 @@ import { Server } from 'http';
 import app from './app';
 import { env } from './config/env';
 import { closeMongo, connectMongo } from './database/mongo';
+import { ensureRevokedTokenIndexes } from './repositories/revoked-token.repository';
 import { ensureUserIndexes } from './repositories/user.repository';
 import { logger } from './utils/logger';
 
@@ -12,6 +13,7 @@ let isShuttingDown = false;
 async function startServer() {
   await connectMongo();
   await ensureUserIndexes();
+  await ensureRevokedTokenIndexes();
 
   server = app.listen(env.PORT, () => {
     logger.info('server_started', {

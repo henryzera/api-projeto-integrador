@@ -14,6 +14,7 @@ const envSchema = z.object({
   MONGO_CONNECT_RETRIES: z.coerce.number().int().min(1).default(5),
   MONGO_CONNECT_RETRY_DELAY_MS: z.coerce.number().int().min(100).default(2000),
   MONGO_DB_NAME: z.string().min(1),
+  MONGO_REVOKED_TOKENS_COLLECTION: z.string().default('revoked_tokens'),
   MONGO_URI: z.string().min(1),
   MONGO_USERS_COLLECTION: z.string().default('users'),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),

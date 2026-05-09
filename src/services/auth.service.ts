@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs';
+import type { ObjectId } from 'mongodb';
 
 import { AppError } from '../errors/AppError';
 import { toPublicUser } from '../mappers/user.mapper';
 import type { PublicUser } from '../models/user.model';
+import { revokeToken } from '../repositories/revoked-token.repository';
 import { createUser, findUserByCnpj, findUserByEmail, findUserById } from '../repositories/user.repository';
 import type { LoginInput, RegisterInput } from '../schemas/auth.schemas';
 import { normalizeEmail, onlyDigits } from '../utils/auth.utils';
@@ -83,4 +85,13 @@ export async function getCurrentUser(userId: string): Promise<PublicUser> {
   }
 
   return toPublicUser(user);
+}
+
+export async function logoutUser(input: { expiresAt: Date; jti: string; userId: ObjectId }): Promise<void> {
+  await revokeToken({
+    expiresAt: input.expiresAt,
+    jti: input.jti,
+    revokedAt: new Date(),
+    userId: input.userId
+  });
 }
