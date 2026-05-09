@@ -4,6 +4,7 @@ import { ZodError } from 'zod';
 
 import { env } from '../config/env';
 import { AppError } from '../errors/AppError';
+import { logger } from '../utils/logger';
 
 export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof AppError) {
@@ -26,7 +27,7 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     });
   }
 
-  console.error(error);
+  logger.error('unhandled_request_error', { error });
 
   return res.status(500).json({
     message: 'Internal server error',

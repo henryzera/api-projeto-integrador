@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: api-projeto-integrador
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: false
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: APP_NAME
+        value: api-projeto-integrador
+      - key: LOG_LEVEL
+        value: info
+      - key: CORS_ORIGIN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: MONGO_DB_NAME
+        sync: false
+      - key: MONGO_COLLECTION
+        sync: false
+      - key: MONGO_USERS_COLLECTION
+        sync: false
+      - key: MONGO_CONNECT_RETRIES
+        value: "5"
+      - key: MONGO_CONNECT_RETRY_DELAY_MS
+        value: "2000"
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 1h
+      - key: JWT_ISSUER
+        value: api-projeto-integrador
+      - key: JWT_AUDIENCE
+        value: front-projeto-integrador

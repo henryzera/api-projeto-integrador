@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - master
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate Node.js API
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
+
+      - name: Lint if configured
+        run: |
+          if node -e "const scripts=require('./package.json').scripts||{}; process.exit(scripts.lint ? 0 : 1)"; then
+            npm run lint
+          else
+            echo "No lint script configured. Skipping."
+          fi
+
+      - name: Test if configured
+        run: |
+          if node -e "const scripts=require('./package.json').scripts||{}; process.exit(scripts.test ? 0 : 1)"; then
+            npm test
+          else
+            echo "No test script configured. Skipping."
+          fi
+
+  deploy:
+    name: Trigger Render deploy
+    needs: validate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+
+    steps:
+      - name: Trigger deploy hook if configured
+        env:
+          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        run: |
+          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            echo "RENDER_DEPLOY_HOOK_URL secret is not configured. Skipping Render deploy hook."
+            exit 0
+          fi
+
+          curl --fail --silent --show-error --request POST "$RENDER_DEPLOY_HOOK_URL"

@@ -1,4 +1,5 @@
 import cors from 'cors';
+import compression from 'compression';
 import express from 'express';
 import helmet from 'helmet';
 
@@ -7,6 +8,7 @@ import { meController } from './controllers/auth.controller';
 import { requireAuth } from './middlewares/auth.middleware';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimiter';
+import { requestLogger } from './middlewares/requestLogger';
 import authRoutes from './routes/auth.routes';
 import contratacoesRoutes from './routes/contratacoes.routes';
 import healthRoutes from './routes/health.routes';
@@ -18,7 +20,11 @@ const corsOrigins = env.CORS_ORIGIN === '*'
   ? '*'
   : env.CORS_ORIGIN.split(',').map((origin) => origin.trim());
 
+app.set('trust proxy', 1);
+
+app.use(requestLogger);
 app.use(helmet());
+app.use(compression());
 app.use(cors({ origin: corsOrigins }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
