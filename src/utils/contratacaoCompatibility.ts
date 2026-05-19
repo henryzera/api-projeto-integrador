@@ -18,7 +18,9 @@ export function calculateCompatibilityScore(contratacao: Record<string, unknown>
     getString(contratacao.objetoCompra),
     getString(contratacao.modalidadeNome),
     getNestedString(contratacao, 'orgaoEntidade', 'razaoSocial'),
-    getNestedString(contratacao, 'unidadeOrgao', 'nomeUnidade')
+    getNestedString(contratacao, 'unidadeOrgao', 'nomeUnidade'),
+    getString(contratacao.municipioNome),
+    getString(contratacao.codigoIbge)
   ].join(' '));
 
   let score = keywords.length > 0 ? 45 : 50;

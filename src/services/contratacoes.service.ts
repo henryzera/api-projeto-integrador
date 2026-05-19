@@ -7,6 +7,8 @@ import {
 import type { ListContratacoesQuery } from '../schemas/contratacoes.schemas';
 import { calculateCompatibilityScore } from '../utils/contratacaoCompatibility';
 
+const meiEppEstimatedValueLimit = 81_000;
+
 export async function listContratacoes(input: ListContratacoesQuery, userCnae?: string) {
   const filter = buildContratacoesFilter(input);
   const cnae = input.cnae ?? userCnae;
@@ -59,11 +61,26 @@ function buildContratacoesFilter(input: ListContratacoesQuery): Record<string, u
   const andFilters: Record<string, unknown>[] = [];
 
   if (input.uf ?? input.ufSigla) {
-    filter['unidadeOrgao.ufSigla'] = input.uf ?? input.ufSigla;
+    const uf = input.uf ?? input.ufSigla ?? '';
+
+    andFilters.push({
+      $or: [
+        { 'unidadeOrgao.ufSigla': buildExactCaseInsensitiveRegex(uf) },
+        { uf: buildExactCaseInsensitiveRegex(uf) }
+      ]
+    });
   }
 
   if (input.municipio ?? input.municipioNome) {
-    filter['unidadeOrgao.municipioNome'] = buildCaseInsensitiveRegex(input.municipio ?? input.municipioNome ?? '');
+    const municipio = input.municipio ?? input.municipioNome ?? '';
+    const regex = buildCaseInsensitiveRegex(municipio);
+
+    andFilters.push({
+      $or: [
+        { 'unidadeOrgao.municipioNome': regex },
+        { municipioNome: regex }
+      ]
+    });
   }
 
   if (input.modalidadeNome) {
@@ -85,7 +102,10 @@ function buildContratacoesFilter(input: ListContratacoesQuery): Record<string, u
         { situacaoCompraNome: regex },
         { 'orgaoEntidade.razaoSocial': regex },
         { 'unidadeOrgao.nomeUnidade': regex },
-        { 'unidadeOrgao.municipioNome': regex }
+        { 'unidadeOrgao.municipioNome': regex },
+        { municipioNome: regex },
+        { codigoIbge: regex },
+        { uf: regex }
       ]
     });
   }
@@ -96,7 +116,7 @@ function buildContratacoesFilter(input: ListContratacoesQuery): Record<string, u
         { exclusivaMeEpp: true },
         { exclusivoME: true },
         { tratamentoDiferenciado: buildCaseInsensitiveRegex('ME') },
-        { valorTotalEstimado: { $lte: 360000 } }
+        { valorTotalEstimado: { $lt: meiEppEstimatedValueLimit } }
       ]
     });
   }
@@ -109,14 +129,22 @@ function buildContratacoesFilter(input: ListContratacoesQuery): Record<string, u
 }
 
 function toContratacaoListItem(contratacao: Record<string, unknown>, cnae?: string) {
+  const municipioNome = getMunicipioNome(contratacao);
+  const ufSigla = getUfSigla(contratacao);
+  const codigoIbge = getCodigoIbge(contratacao);
+
   return {
     _id: getId(contratacao),
     anoCompra: contratacao.anoCompra ?? null,
+    codigoIbge,
+    dataAtualizacao: contratacao.dataAtualizacao ?? contratacao.dataAtualizacaoGlobal ?? null,
     numeroCompra: contratacao.numeroCompra ?? null,
     objetoCompra: contratacao.objetoCompra ?? null,
     modalidadeNome: contratacao.modalidadeNome ?? null,
+    municipioNome,
     situacaoCompraNome: contratacao.situacaoCompraNome ?? null,
     dataEncerramentoProposta: contratacao.dataEncerramentoProposta ?? null,
+    uf: ufSigla ? String(ufSigla).toLowerCase() : null,
     valorTotalEstimado: contratacao.valorTotalEstimado ?? null,
     compatibilityScore: calculateCompatibilityScore(contratacao, cnae),
     orgaoEntidade: {
@@ -124,23 +152,30 @@ function toContratacaoListItem(contratacao: Record<string, unknown>, cnae?: stri
     },
     unidadeOrgao: {
       nomeUnidade: getNestedValue(contratacao, 'unidadeOrgao', 'nomeUnidade'),
-      municipioNome: getNestedValue(contratacao, 'unidadeOrgao', 'municipioNome'),
-      ufSigla: getNestedValue(contratacao, 'unidadeOrgao', 'ufSigla')
+      municipioNome,
+      ufSigla,
+      codigoIbge
     }
   };
 }
 
 function toContratacaoDetail(contratacao: Record<string, unknown>, cnae?: string) {
+  const municipioNome = getMunicipioNome(contratacao);
+  const ufSigla = getUfSigla(contratacao);
+  const codigoIbge = getCodigoIbge(contratacao);
+
   return {
     ...contratacao,
     _id: getId(contratacao),
+    codigoIbge,
     compatibilityScore: calculateCompatibilityScore(contratacao, cnae),
     dadosOrgao: {
       cnpj: getNestedValue(contratacao, 'orgaoEntidade', 'cnpj'),
       razaoSocial: getNestedValue(contratacao, 'orgaoEntidade', 'razaoSocial'),
       unidade: getNestedValue(contratacao, 'unidadeOrgao', 'nomeUnidade'),
-      municipio: getNestedValue(contratacao, 'unidadeOrgao', 'municipioNome'),
-      uf: getNestedValue(contratacao, 'unidadeOrgao', 'ufSigla')
+      municipio: municipioNome,
+      uf: ufSigla,
+      codigoIbge
     },
     datasImportantes: {
       aberturaProposta: contratacao.dataAberturaProposta ?? null,
@@ -149,8 +184,10 @@ function toContratacaoDetail(contratacao: Record<string, unknown>, cnae?: string
       ultimaAtualizacao: contratacao.dataAtualizacaoGlobal ?? contratacao.dataAtualizacao ?? null
     },
     documentosExigidos: buildRequiredDocuments(),
+    municipioNome,
     requisitos: buildRequirements(contratacao),
     statusOportunidade: getStatusOportunidade(contratacao),
+    uf: ufSigla ? String(ufSigla).toLowerCase() : null,
     valorEstimado: contratacao.valorTotalEstimado ?? contratacao.valorTotalHomologado ?? null
   };
 }
@@ -179,7 +216,11 @@ function buildRequirements(contratacao: Record<string, unknown>): string[] {
 }
 
 function getStatusOportunidade(contratacao: Record<string, unknown>): string {
-  const status = typeof contratacao.situacaoCompraNome === 'string' ? contratacao.situacaoCompraNome : 'Indefinida';
+  const status = typeof contratacao.situacaoCompraNome === 'string'
+    ? contratacao.situacaoCompraNome
+    : typeof contratacao.status === 'string'
+      ? contratacao.status
+      : 'Indefinida';
   const deadline = parseDate(contratacao.dataEncerramentoProposta);
 
   if (deadline && deadline.getTime() < Date.now()) {
@@ -197,6 +238,26 @@ function getNestedValue(document: Record<string, unknown>, key: string, nestedKe
   }
 
   return (nested as Record<string, unknown>)[nestedKey] ?? null;
+}
+
+function getMunicipioNome(contratacao: Record<string, unknown>): unknown {
+  return getNestedValue(contratacao, 'unidadeOrgao', 'municipioNome') ?? contratacao.municipioNome ?? null;
+}
+
+function getUfSigla(contratacao: Record<string, unknown>): string | null {
+  const uf = getNestedValue(contratacao, 'unidadeOrgao', 'ufSigla') ?? contratacao.uf ?? null;
+
+  return typeof uf === 'string' && uf.trim() ? uf.trim().toUpperCase() : null;
+}
+
+function getCodigoIbge(contratacao: Record<string, unknown>): unknown {
+  return (
+    getNestedValue(contratacao, 'unidadeOrgao', 'codigoIbge') ??
+    getNestedValue(contratacao, 'unidadeOrgao', 'codigoMunicipioIbge') ??
+    contratacao.codigoIbge ??
+    contratacao.codigoMunicipioIbge ??
+    null
+  );
 }
 
 function getId(document: Record<string, unknown>): string {
@@ -221,6 +282,10 @@ function buildCaseInsensitiveRegex(value: string): RegExp {
   return new RegExp(escapeRegex(value), 'i');
 }
 
+function buildExactCaseInsensitiveRegex(value: string): RegExp {
+  return new RegExp(`^${escapeRegex(value)}$`, 'i');
+}
+
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -232,11 +297,11 @@ function filterSeedContratacoes(input: ListContratacoesQuery): Array<Record<stri
   const status = input.status ?? input.situacaoCompraNome;
 
   return seedContratacoes.filter((contratacao) => {
-    if (uf && getNestedValue(contratacao, 'unidadeOrgao', 'ufSigla') !== uf) {
+    if (uf && getUfSigla(contratacao) !== uf) {
       return false;
     }
 
-    if (municipio && !String(getNestedValue(contratacao, 'unidadeOrgao', 'municipioNome')).toLowerCase().includes(municipio.toLowerCase())) {
+    if (municipio && !String(getMunicipioNome(contratacao)).toLowerCase().includes(municipio.toLowerCase())) {
       return false;
     }
 
@@ -244,7 +309,7 @@ function filterSeedContratacoes(input: ListContratacoesQuery): Array<Record<stri
       return false;
     }
 
-    if (input.meOnly && Number(contratacao.valorTotalEstimado ?? 0) > 360000) {
+    if (input.meOnly && Number(contratacao.valorTotalEstimado ?? 0) >= meiEppEstimatedValueLimit) {
       return false;
     }
 
@@ -254,7 +319,10 @@ function filterSeedContratacoes(input: ListContratacoesQuery): Array<Record<stri
         contratacao.numeroCompra,
         contratacao.modalidadeNome,
         getNestedValue(contratacao, 'orgaoEntidade', 'razaoSocial'),
-        getNestedValue(contratacao, 'unidadeOrgao', 'nomeUnidade')
+        getNestedValue(contratacao, 'unidadeOrgao', 'nomeUnidade'),
+        getMunicipioNome(contratacao),
+        getCodigoIbge(contratacao),
+        getUfSigla(contratacao)
       ]
         .join(' ')
         .toLowerCase();
