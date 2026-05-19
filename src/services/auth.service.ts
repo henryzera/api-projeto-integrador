@@ -3,9 +3,10 @@ import type { ObjectId } from 'mongodb';
 
 import { AppError } from '../errors/AppError';
 import { toPublicUser } from '../mappers/user.mapper';
-import type { PublicUser } from '../models/user.model';
+import { defaultNotificationPreferences, type PublicUser } from '../models/user.model';
 import { revokeToken } from '../repositories/revoked-token.repository';
-import { createUser, findUserByCnpj, findUserByEmail, findUserById } from '../repositories/user.repository';
+import { createUser, findUserByCnpj, findUserByEmail, findUserById, updateUserById } from '../repositories/user.repository';
+import type { UpdateMeInput } from '../schemas/profile.schemas';
 import type { LoginInput, RegisterInput } from '../schemas/auth.schemas';
 import { normalizeEmail, onlyDigits } from '../utils/auth.utils';
 import { signAccessToken } from './jwt.service';
@@ -40,6 +41,7 @@ export async function registerUser(input: RegisterInput): Promise<AuthResponse> 
     emailNormalized: input.email,
     firstName: input.firstName,
     lastName: input.lastName,
+    notificationPreferences: defaultNotificationPreferences,
     passwordHash,
     updatedAt: now
   });
@@ -94,4 +96,55 @@ export async function logoutUser(input: { expiresAt: Date; jti: string; userId: 
     revokedAt: new Date(),
     userId: input.userId
   });
+}
+
+export async function updateCurrentUser(userId: string, input: UpdateMeInput): Promise<PublicUser> {
+  const currentUser = await findUserById(userId);
+
+  if (!currentUser) {
+    throw new AppError(404, 'User not found');
+  }
+
+  if (input.email && input.email !== currentUser.emailNormalized) {
+    const existingUser = await findUserByEmail(input.email);
+
+    if (existingUser && existingUser._id.toString() !== userId) {
+      throw new AppError(409, 'Email already registered');
+    }
+  }
+
+  if (input.cnpj && input.cnpj !== currentUser.cnpj) {
+    const existingUser = await findUserByCnpj(input.cnpj);
+
+    if (existingUser && existingUser._id.toString() !== userId) {
+      throw new AppError(409, 'CNPJ already registered');
+    }
+  }
+
+  const { notificationPreferences, ...profileUpdates } = input;
+  const updatedUser = await updateUserById(userId, {
+    ...profileUpdates,
+    ...(profileUpdates.email
+      ? {
+          email: profileUpdates.email,
+          emailNormalized: profileUpdates.email
+        }
+      : {}),
+    ...(notificationPreferences
+      ? {
+          notificationPreferences: {
+            ...defaultNotificationPreferences,
+            ...currentUser.notificationPreferences,
+            ...notificationPreferences
+          }
+        }
+      : {}),
+    updatedAt: new Date()
+  });
+
+  if (!updatedUser) {
+    throw new AppError(404, 'User not found');
+  }
+
+  return toPublicUser(updatedUser);
 }

@@ -9,6 +9,7 @@ export type UserDocument = {
   emailNormalized: string;
   firstName: string;
   lastName: string;
+  notificationPreferences?: NotificationPreferences;
   passwordHash: string;
   updatedAt: Date;
 };
@@ -23,5 +24,22 @@ export type PublicUser = {
   email: string;
   firstName: string;
   lastName: string;
+  notificationPreferences: NotificationPreferences;
   updatedAt: Date;
+};
+
+export type NotificationPreferences = {
+  documentAlerts: boolean;
+  email: boolean;
+  proposalAlerts: boolean;
+  push: boolean;
+  daysBeforeDeadline: number;
+};
+
+export const defaultNotificationPreferences: NotificationPreferences = {
+  documentAlerts: true,
+  email: true,
+  proposalAlerts: true,
+  push: true,
+  daysBeforeDeadline: 3
 };

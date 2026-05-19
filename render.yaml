@@ -24,6 +24,12 @@ services:
         sync: false
       - key: MONGO_USERS_COLLECTION
         sync: false
+      - key: MONGO_DOCUMENTS_COLLECTION
+        value: user_documents
+      - key: MONGO_ALERTS_COLLECTION
+        value: user_alerts
+      - key: MONGO_REVOKED_TOKENS_COLLECTION
+        value: revoked_tokens
       - key: MONGO_CONNECT_RETRIES
         value: "5"
       - key: MONGO_CONNECT_RETRY_DELAY_MS

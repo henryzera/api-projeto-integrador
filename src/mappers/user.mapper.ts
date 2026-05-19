@@ -1,4 +1,4 @@
-import type { PublicUser, UserWithId } from '../models/user.model';
+import { defaultNotificationPreferences, type PublicUser, type UserWithId } from '../models/user.model';
 
 export function toPublicUser(user: UserWithId): PublicUser {
   return {
@@ -9,6 +9,10 @@ export function toPublicUser(user: UserWithId): PublicUser {
     email: user.email,
     firstName: user.firstName,
     lastName: user.lastName,
+    notificationPreferences: {
+      ...defaultNotificationPreferences,
+      ...user.notificationPreferences
+    },
     updatedAt: user.updatedAt
   };
 }

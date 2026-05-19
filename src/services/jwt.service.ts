@@ -6,6 +6,7 @@ import { AppError } from '../errors/AppError';
 import type { PublicUser } from '../models/user.model';
 
 type AuthTokenPayload = JwtPayload & {
+  cnae?: string;
   email: string;
   exp: number;
   jti: string;
@@ -21,7 +22,7 @@ export function signAccessToken(user: PublicUser): string {
     subject: user.id
   };
 
-  return jwt.sign({ email: user.email }, env.JWT_SECRET, options);
+  return jwt.sign({ cnae: user.cnae, email: user.email }, env.JWT_SECRET, options);
 }
 
 export function verifyAccessToken(token: string): AuthTokenPayload {

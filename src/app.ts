@@ -4,14 +4,18 @@ import express from 'express';
 import helmet from 'helmet';
 
 import { env } from './config/env';
-import { meController } from './controllers/auth.controller';
+import { meController, updateMeController } from './controllers/auth.controller';
 import { requireAuth } from './middlewares/auth.middleware';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimiter';
 import { requestLogger } from './middlewares/requestLogger';
+import { validateRequest } from './middlewares/validateRequest';
+import alertRoutes from './routes/alert.routes';
 import authRoutes from './routes/auth.routes';
 import contratacoesRoutes from './routes/contratacoes.routes';
+import documentRoutes from './routes/document.routes';
 import healthRoutes from './routes/health.routes';
+import { updateMeSchema } from './schemas/profile.schemas';
 import { asyncHandler } from './utils/asyncHandler';
 
 const app = express();
@@ -40,7 +44,10 @@ app.use(
 app.use('/health', healthRoutes);
 app.use('/auth', authRoutes);
 app.get('/me', requireAuth, asyncHandler(meController));
+app.patch('/me', requireAuth, validateRequest({ body: updateMeSchema }), asyncHandler(updateMeController));
 app.use('/contratacoes', requireAuth, contratacoesRoutes);
+app.use('/documents', requireAuth, documentRoutes);
+app.use('/alerts', requireAuth, alertRoutes);
 
 app.use(errorHandler);
 

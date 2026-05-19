@@ -21,6 +21,7 @@ export async function requireAuth(req: Request, _res: Response, next: NextFuncti
     }
 
     req.user = {
+      cnae: typeof payload.cnae === 'string' ? payload.cnae : '',
       email: payload.email,
       expiresAt: new Date(payload.exp * 1000),
       id: payload.sub,

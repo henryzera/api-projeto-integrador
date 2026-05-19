@@ -48,3 +48,21 @@ export async function findUserById(id: string): Promise<UserWithId | null> {
 
   return users.findOne({ _id: new ObjectId(id) });
 }
+
+export async function updateUserById(id: string, updates: Partial<UserDocument>): Promise<UserWithId | null> {
+  if (!ObjectId.isValid(id)) {
+    return null;
+  }
+
+  const users = await getUsersCollection();
+
+  return users.findOneAndUpdate(
+    { _id: new ObjectId(id) },
+    {
+      $set: updates
+    },
+    {
+      returnDocument: 'after'
+    }
+  );
+}

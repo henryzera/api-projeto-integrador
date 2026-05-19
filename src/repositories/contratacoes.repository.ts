@@ -16,7 +16,15 @@ export async function countContratacoes(filter: Record<string, unknown>): Promis
 export async function findContratacoes(filter: Record<string, unknown>, pagination: Pagination) {
   const collection = await getMongoCollection();
 
-  return collection.find(filter).skip(pagination.skip).limit(pagination.limit).toArray();
+  return collection
+    .find(filter)
+    .sort({
+      dataEncerramentoProposta: 1,
+      dataPublicacaoPncp: -1
+    })
+    .skip(pagination.skip)
+    .limit(pagination.limit)
+    .toArray();
 }
 
 export async function findContratacaoById(id: string) {

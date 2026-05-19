@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 
 import { AppError } from '../errors/AppError';
-import { loginUser, getCurrentUser, logoutUser, registerUser } from '../services/auth.service';
+import { loginUser, getCurrentUser, logoutUser, registerUser, updateCurrentUser } from '../services/auth.service';
 
 export async function registerController(req: Request, res: Response) {
   const auth = await registerUser(req.body);
@@ -37,4 +37,14 @@ export async function logoutController(req: Request, res: Response) {
   });
 
   return res.status(204).send();
+}
+
+export async function updateMeController(req: Request, res: Response) {
+  if (!req.user) {
+    throw new AppError(401, 'Authentication token is required');
+  }
+
+  const user = await updateCurrentUser(req.user.id, req.body);
+
+  return res.status(200).json({ user });
 }
