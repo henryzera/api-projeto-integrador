@@ -5,10 +5,8 @@ import {
   deleteDocumentController,
   getDocumentsSummaryController,
   listDocumentsController,
-  uploadDocumentController,
   updateDocumentController
 } from '../controllers/document.controller';
-import { documentUpload } from '../middlewares/documentUpload';
 import { validateRequest } from '../middlewares/validateRequest';
 import {
   createDocumentSchema,
@@ -21,7 +19,6 @@ const router = Router();
 
 router.get('/summary', asyncHandler(getDocumentsSummaryController));
 router.get('/', asyncHandler(listDocumentsController));
-router.post('/upload', documentUpload.single('file'), asyncHandler(uploadDocumentController));
 router.post('/', validateRequest({ body: createDocumentSchema }), asyncHandler(createDocumentController));
 router.patch(
   '/:id',

@@ -5,7 +5,6 @@ import { env } from './config/env';
 import { closeMongo, connectMongo } from './database/mongo';
 import { ensureAlertIndexes } from './repositories/alert.repository';
 import { ensureDocumentIndexes } from './repositories/document.repository';
-import { ensurePasswordResetIndexes } from './repositories/password-reset.repository';
 import { ensureRevokedTokenIndexes } from './repositories/revoked-token.repository';
 import { ensureUserIndexes } from './repositories/user.repository';
 import { logger } from './utils/logger';
@@ -18,7 +17,6 @@ async function startServer() {
   await Promise.all([
     ensureAlertIndexes(),
     ensureDocumentIndexes(),
-    ensurePasswordResetIndexes(),
     ensureRevokedTokenIndexes(),
     ensureUserIndexes()
   ]);

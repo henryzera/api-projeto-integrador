@@ -132,6 +132,7 @@ function toContratacaoListItem(contratacao: Record<string, unknown>, cnae?: stri
   const municipioNome = getMunicipioNome(contratacao);
   const ufSigla = getUfSigla(contratacao);
   const codigoIbge = getCodigoIbge(contratacao);
+  const linksOficiais = buildOfficialLinks(contratacao);
 
   return {
     _id: getId(contratacao),
@@ -147,6 +148,8 @@ function toContratacaoListItem(contratacao: Record<string, unknown>, cnae?: stri
     uf: ufSigla ? String(ufSigla).toLowerCase() : null,
     valorTotalEstimado: contratacao.valorTotalEstimado ?? null,
     compatibilityScore: calculateCompatibilityScore(contratacao, cnae),
+    linkOficial: linksOficiais[0]?.url ?? null,
+    linksOficiais,
     orgaoEntidade: {
       razaoSocial: getNestedValue(contratacao, 'orgaoEntidade', 'razaoSocial')
     },
@@ -163,6 +166,7 @@ function toContratacaoDetail(contratacao: Record<string, unknown>, cnae?: string
   const municipioNome = getMunicipioNome(contratacao);
   const ufSigla = getUfSigla(contratacao);
   const codigoIbge = getCodigoIbge(contratacao);
+  const linksOficiais = buildOfficialLinks(contratacao);
 
   return {
     ...contratacao,
@@ -184,12 +188,57 @@ function toContratacaoDetail(contratacao: Record<string, unknown>, cnae?: string
       ultimaAtualizacao: contratacao.dataAtualizacaoGlobal ?? contratacao.dataAtualizacao ?? null
     },
     documentosExigidos: buildRequiredDocuments(),
+    linkOficial: linksOficiais[0]?.url ?? null,
+    linksOficiais,
     municipioNome,
     requisitos: buildRequirements(contratacao),
     statusOportunidade: getStatusOportunidade(contratacao),
     uf: ufSigla ? String(ufSigla).toLowerCase() : null,
     valorEstimado: contratacao.valorTotalEstimado ?? contratacao.valorTotalHomologado ?? null
   };
+}
+
+function buildOfficialLinks(contratacao: Record<string, unknown>) {
+  const candidates = [
+    {
+      key: 'linkSistemaOrigem',
+      label: 'Portal de origem',
+      type: 'sistema_origem'
+    },
+    {
+      key: 'linkProcessoEletronico',
+      label: 'Processo eletronico',
+      type: 'processo_eletronico'
+    },
+    {
+      key: 'linkPncp',
+      label: 'Portal PNCP',
+      type: 'pncp'
+    },
+    {
+      key: 'linkPNCP',
+      label: 'Portal PNCP',
+      type: 'pncp'
+    }
+  ];
+
+  const links = candidates
+    .map(({ key, label, type }) => {
+      const value = contratacao[key];
+
+      if (typeof value !== 'string' || !value.trim()) {
+        return null;
+      }
+
+      return {
+        label,
+        type,
+        url: value.trim()
+      };
+    })
+    .filter((link): link is { label: string; type: string; url: string } => Boolean(link));
+
+  return Array.from(new Map(links.map((link) => [link.url, link])).values());
 }
 
 function buildRequiredDocuments(): string[] {
