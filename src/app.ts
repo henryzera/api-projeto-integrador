@@ -5,6 +5,7 @@ import helmet from 'helmet';
 
 import { env } from './config/env';
 import { meController, updateMeController } from './controllers/auth.controller';
+import { getMeDashboardController } from './controllers/dashboard.controller';
 import { requireAuth } from './middlewares/auth.middleware';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimiter';
@@ -43,6 +44,7 @@ app.use(
 // rotas
 app.use('/health', healthRoutes);
 app.use('/auth', authRoutes);
+app.get('/me/dashboard', requireAuth, asyncHandler(getMeDashboardController));
 app.get('/me', requireAuth, asyncHandler(meController));
 app.patch('/me', requireAuth, validateRequest({ body: updateMeSchema }), asyncHandler(updateMeController));
 app.use('/contratacoes', requireAuth, contratacoesRoutes);

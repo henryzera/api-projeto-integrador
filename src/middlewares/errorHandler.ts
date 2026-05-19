@@ -1,4 +1,5 @@
 import { ErrorRequestHandler } from 'express';
+import { MulterError } from 'multer';
 import { MongoServerError } from 'mongodb';
 import { ZodError } from 'zod';
 
@@ -18,6 +19,15 @@ export const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
     return res.status(400).json({
       message: 'Invalid request data',
       details: error.flatten()
+    });
+  }
+
+  if (error instanceof MulterError) {
+    return res.status(error.code === 'LIMIT_FILE_SIZE' ? 413 : 400).json({
+      message: error.code === 'LIMIT_FILE_SIZE' ? 'File is too large' : 'Invalid file upload',
+      details: {
+        code: error.code
+      }
     });
   }
 

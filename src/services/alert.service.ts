@@ -95,7 +95,7 @@ async function buildDocumentAlerts(userId: ObjectId): Promise<AlertRecord[]> {
 
 async function buildProposalAlerts(userId: ObjectId): Promise<AlertRecord[]> {
   const now = new Date();
-  const contratacoes = await findContratacoes({}, { limit: 8, skip: 0 });
+  const contratacoes = await findContratacoes({}, { limit: 50, skip: 0 });
 
   return contratacoes
     .map((contratacao): AlertRecord | null => {
@@ -141,17 +141,17 @@ async function buildProposalAlerts(userId: ObjectId): Promise<AlertRecord[]> {
 
 async function buildCompatibleNoticeAlerts(userId: ObjectId, cnae: string): Promise<AlertRecord[]> {
   const now = new Date();
-  const contratacoes = await findContratacoes({}, { limit: 8, skip: 0 });
+  const contratacoes = await findContratacoes({}, { limit: 50, skip: 0 });
 
   return contratacoes
     .filter((contratacao) => calculateCompatibilityScore(contratacao, cnae) >= 60)
-    .slice(0, 3)
+    .slice(0, 10)
     .map((contratacao) => {
       const id = String(contratacao._id);
 
       return {
         createdAt: now,
-        date: toDateOnly(parseDate(contratacao.dataPublicacaoPncp) ?? now),
+        date: toDateOnly(parseDate(contratacao.dataPublicacaoPncp) ?? parseDate(contratacao.dataAtualizacao) ?? now),
         description: 'Novo edital com boa compatibilidade com o CNAE da empresa',
         kind: 'info',
         priority: 4,

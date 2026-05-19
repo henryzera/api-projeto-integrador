@@ -28,6 +28,8 @@ services:
         value: user_documents
       - key: MONGO_ALERTS_COLLECTION
         value: user_alerts
+      - key: MONGO_PASSWORD_RESETS_COLLECTION
+        value: password_resets
       - key: MONGO_REVOKED_TOKENS_COLLECTION
         value: revoked_tokens
       - key: MONGO_CONNECT_RETRIES
@@ -42,3 +44,15 @@ services:
         value: api-projeto-integrador
       - key: JWT_AUDIENCE
         value: front-projeto-integrador
+      - key: RESET_PASSWORD_FRONT_URL
+        sync: false
+      - key: RESET_PASSWORD_TOKEN_TTL_MINUTES
+        value: "15"
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
+      - key: CLOUDINARY_UPLOAD_FOLDER
+        value: projeto-integrador/documents
