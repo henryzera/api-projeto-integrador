@@ -26,6 +26,7 @@ export async function connectMongo(): Promise<Db> {
     } catch (error) {
       logger.warn('mongodb_connection_failed', {
         attempt,
+        error,
         maxAttempts: env.MONGO_CONNECT_RETRIES
       });
 

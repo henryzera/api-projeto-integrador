@@ -3,7 +3,7 @@ services:
     name: api-projeto-integrador
     runtime: node
     plan: free
-    buildCommand: npm ci && npm run build
+    buildCommand: npm ci --include=dev && npm run build && npm prune --omit=dev
     startCommand: npm start
     healthCheckPath: /health
     autoDeploy: false
