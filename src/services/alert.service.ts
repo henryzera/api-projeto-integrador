@@ -3,7 +3,7 @@ import type { ObjectId } from 'mongodb';
 import { AppError } from '../errors/AppError';
 import type { AlertRecord, AlertStatus, AlertWithId, PublicAlert } from '../models/alert.model';
 import { findAlerts, updateAlertStatus, upsertAlertBySourceKey } from '../repositories/alert.repository';
-import { findContratacoes } from '../repositories/contratacoes.repository';
+import { findContratacoesPool } from '../repositories/contratacoes.repository';
 import { findDocumentsByUser } from '../repositories/document.repository';
 import type { ListAlertsQuery } from '../schemas/alert.schemas';
 import { calculateCompatibilityScore } from '../utils/contratacaoCompatibility';
@@ -44,16 +44,43 @@ async function updateStatus(userId: ObjectId, id: string, status: AlertStatus): 
   };
 }
 
-async function syncAutomaticAlerts(userId: ObjectId, cnae: string): Promise<void> {
+// Teto do pool de contratacoes consideradas para gerar alertas. Em vez de varrer
+// indiscriminadamente as primeiras N (antigo cap fixo de 50), buscamos um pool
+// maior e filtramos por relevancia ao usuario (UF do usuario quando disponivel
+// e/ou compatibilidade de CNAE >= limiar) antes de gerar alertas.
+const alertPoolLimit = 300;
+
+// Limiar minimo de compatibilidade (0-100) para considerar um edital relevante
+// ao CNAE do usuario nos alertas de prazo e de novos editais compativeis.
+const proposalRelevanceThreshold = 50;
+const compatibleNoticeThreshold = 60;
+
+async function syncAutomaticAlerts(userId: ObjectId, cnae: string, userUf?: string): Promise<void> {
   await listDocuments(userId);
 
-  const [documentAlerts, proposalAlerts, infoAlerts] = await Promise.all([
-    buildDocumentAlerts(userId),
-    buildProposalAlerts(userId),
-    buildCompatibleNoticeAlerts(userId, cnae)
-  ]);
+  const now = new Date();
+  const contratacoes = await findContratacoesPool(buildRelevanceFilter(userUf), alertPoolLimit);
+
+  const documentAlerts = await buildDocumentAlerts(userId);
+  const proposalAlerts = buildProposalAlertRecords(contratacoes, userId, cnae, now);
+  const infoAlerts = buildCompatibleNoticeAlertRecords(contratacoes, userId, cnae, now);
 
   await Promise.all([...documentAlerts, ...proposalAlerts, ...infoAlerts].map(upsertAlertBySourceKey));
+}
+
+// Filtro de relevancia aplicado no Mongo: restringe por UF do usuario quando
+// disponivel. A compatibilidade por CNAE e aplicada em memoria sobre o pool.
+export function buildRelevanceFilter(userUf?: string): Record<string, unknown> {
+  if (!userUf) {
+    return {};
+  }
+
+  const normalizedUf = userUf.trim().toUpperCase();
+  const ufRegex = new RegExp(`^${normalizedUf.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+
+  return {
+    $or: [{ 'unidadeOrgao.ufSigla': ufRegex }, { uf: ufRegex }]
+  };
 }
 
 async function buildDocumentAlerts(userId: ObjectId): Promise<AlertRecord[]> {
@@ -93,11 +120,17 @@ async function buildDocumentAlerts(userId: ObjectId): Promise<AlertRecord[]> {
     .filter((alert): alert is AlertRecord => Boolean(alert));
 }
 
-async function buildProposalAlerts(userId: ObjectId): Promise<AlertRecord[]> {
-  const now = new Date();
-  const contratacoes = await findContratacoes({}, { limit: 50, skip: 0 });
-
+// Funcao pura e testavel: gera os AlertRecord de prazo de proposta a partir de
+// um conjunto de contratacoes ja considerado relevante. Filtra por compatibilidade
+// de CNAE >= limiar e por prazo (0..15 dias).
+export function buildProposalAlertRecords(
+  contratacoes: Array<Record<string, unknown>>,
+  userId: ObjectId,
+  cnae: string,
+  now: Date = new Date()
+): AlertRecord[] {
   return contratacoes
+    .filter((contratacao) => calculateCompatibilityScore(contratacao, cnae) >= proposalRelevanceThreshold)
     .map((contratacao): AlertRecord | null => {
       const deadline = parseDate(contratacao.dataEncerramentoProposta);
 
@@ -139,12 +172,16 @@ async function buildProposalAlerts(userId: ObjectId): Promise<AlertRecord[]> {
     .filter((alert): alert is AlertRecord => Boolean(alert));
 }
 
-async function buildCompatibleNoticeAlerts(userId: ObjectId, cnae: string): Promise<AlertRecord[]> {
-  const now = new Date();
-  const contratacoes = await findContratacoes({}, { limit: 50, skip: 0 });
-
+// Funcao pura e testavel: gera os AlertRecord informativos de novos editais com
+// boa compatibilidade de CNAE (>= limiar). Limita a 10 para nao inundar a caixa.
+export function buildCompatibleNoticeAlertRecords(
+  contratacoes: Array<Record<string, unknown>>,
+  userId: ObjectId,
+  cnae: string,
+  now: Date = new Date()
+): AlertRecord[] {
   return contratacoes
-    .filter((contratacao) => calculateCompatibilityScore(contratacao, cnae) >= 60)
+    .filter((contratacao) => calculateCompatibilityScore(contratacao, cnae) >= compatibleNoticeThreshold)
     .slice(0, 10)
     .map((contratacao) => {
       const id = String(contratacao._id);
@@ -214,13 +251,26 @@ function getContratacaoTitle(contratacao: Record<string, unknown>): string {
   return typeof numeroCompra === 'string' ? `Edital ${numeroCompra}` : 'Novo edital disponivel';
 }
 
-function parseDate(value: unknown): Date | null {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) {
-    return value;
+// Parsing de datas padronizado para UTC explicito. Strings sem informacao de
+// timezone (ex.: "2026-06-12T10:00:00" vindas do ETL/PNCP) sao interpretadas
+// como UTC para evitar ambiguidade conforme o timezone do servidor. Strings com
+// TZ explicito (Z ou +/-HH:MM) sao respeitadas como vierem.
+export function parseDate(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
   }
 
   if (typeof value === 'string') {
-    const date = new Date(value);
+    const trimmed = value.trim();
+
+    if (!trimmed) {
+      return null;
+    }
+
+    const hasTimezone = /(?:z|[+-]\d{2}:?\d{2})$/i.test(trimmed);
+    const isDateTimeWithoutTz = /^\d{4}-\d{2}-\d{2}t\d{2}:\d{2}/i.test(trimmed) && !hasTimezone;
+    const normalized = isDateTimeWithoutTz ? `${trimmed}Z` : trimmed;
+    const date = new Date(normalized);
 
     return Number.isNaN(date.getTime()) ? null : date;
   }

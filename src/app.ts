@@ -18,8 +18,19 @@ import documentRoutes from './routes/document.routes';
 import healthRoutes from './routes/health.routes';
 import { updateMeSchema } from './schemas/profile.schemas';
 import { asyncHandler } from './utils/asyncHandler';
+import { logger } from './utils/logger';
 
 const app = express();
+
+// CORS restritivo em producao: se rodando em producao com CORS_ORIGIN='*',
+// emitimos um aviso forte (nao derrubamos o boot para nao quebrar o deploy
+// atual). Defina CORS_ORIGIN com a lista de origens confiaveis em producao.
+if (env.NODE_ENV === 'production' && env.CORS_ORIGIN === '*') {
+  logger.warn('cors_insecure_wildcard_in_production', {
+    message:
+      'CORS_ORIGIN esta definido como "*" em producao. Isso permite requisicoes de qualquer origem. Configure CORS_ORIGIN com a lista de origens confiaveis (separadas por virgula).'
+  });
+}
 
 const corsOrigins = env.CORS_ORIGIN === '*'
   ? '*'

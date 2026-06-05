@@ -1,6 +1,7 @@
 import { Collection, Db, Document, MongoClient, ServerApiVersion } from 'mongodb';
 
 import { env } from '../config/env';
+import { AppError } from '../errors/AppError';
 import { logger } from '../utils/logger';
 
 let client: MongoClient | null = null;
@@ -57,9 +58,23 @@ function createMongoClient(): MongoClient {
 export async function getMongoCollection<TSchema extends Document = Document>(
   collectionName = env.MONGO_COLLECTION
 ): Promise<Collection<TSchema>> {
-  const db = await connectMongo();
+  // Se ja temos conexao ativa, retornamos rapidamente. Caso contrario tentamos
+  // (re)conectar uma vez; se falhar, lancamos um erro tratado (503) em vez de
+  // derrubar o processo — o boot resiliente segue tentando reconectar em
+  // background.
+  if (database) {
+    return database.collection<TSchema>(collectionName);
+  }
 
-  return db.collection<TSchema>(collectionName);
+  try {
+    const db = await connectMongo();
+
+    return db.collection<TSchema>(collectionName);
+  } catch (error) {
+    logger.warn('mongo_collection_unavailable', { collectionName, error });
+
+    throw new AppError(503, 'Database temporarily unavailable. Please try again shortly.');
+  }
 }
 
 export async function closeMongo(): Promise<void> {

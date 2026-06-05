@@ -1,7 +1,15 @@
 import { Request, Response } from 'express';
 
 import { AppError } from '../errors/AppError';
-import { loginUser, getCurrentUser, logoutUser, registerUser, updateCurrentUser } from '../services/auth.service';
+import {
+  loginUser,
+  getCurrentUser,
+  logoutUser,
+  registerUser,
+  requestPasswordReset,
+  resetPassword,
+  updateCurrentUser
+} from '../services/auth.service';
 
 export async function registerController(req: Request, res: Response) {
   const auth = await registerUser(req.body);
@@ -13,6 +21,18 @@ export async function loginController(req: Request, res: Response) {
   const auth = await loginUser(req.body);
 
   return res.status(200).json(auth);
+}
+
+export async function forgotPasswordController(req: Request, res: Response) {
+  const result = await requestPasswordReset(req.body);
+
+  return res.status(200).json(result);
+}
+
+export async function resetPasswordController(req: Request, res: Response) {
+  const result = await resetPassword(req.body);
+
+  return res.status(200).json(result);
 }
 
 export async function meController(req: Request, res: Response) {

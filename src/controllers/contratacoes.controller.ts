@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 
 import { AppError } from '../errors/AppError';
-import { contratacaoParamsSchema, listContratacoesQuerySchema } from '../schemas/contratacoes.schemas';
+import type { ListContratacoesQuery } from '../schemas/contratacoes.schemas';
 import { getContratacaoById, listContratacoes } from '../services/contratacoes.service';
 
 export async function listContratacoesController(req: Request, res: Response) {
@@ -9,7 +9,7 @@ export async function listContratacoesController(req: Request, res: Response) {
     throw new AppError(401, 'Authentication token is required');
   }
 
-  const query = listContratacoesQuerySchema.parse(req.query);
+  const query = req.query as unknown as ListContratacoesQuery;
   const result = await listContratacoes(query, req.user.cnae);
 
   return res.status(200).json(result);
@@ -20,7 +20,7 @@ export async function getContratacaoByIdController(req: Request, res: Response) 
     throw new AppError(401, 'Authentication token is required');
   }
 
-  const { id } = contratacaoParamsSchema.parse(req.params);
+  const id = String(req.params.id);
   const result = await getContratacaoById(id, req.user.cnae);
 
   return res.status(200).json(result);

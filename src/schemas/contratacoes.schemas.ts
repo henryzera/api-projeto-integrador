@@ -26,12 +26,20 @@ export const listContratacoesQuerySchema = z
     status: z.string().trim().max(120).optional(),
     situacaoCompraNome: z.string().trim().max(120).optional(),
     uf: z.string().trim().length(2).toUpperCase().optional(),
-    ufSigla: z.string().trim().length(2).toUpperCase().optional()
+    ufSigla: z.string().trim().length(2).toUpperCase().optional(),
+    valorMax: z.coerce.number().nonnegative().optional(),
+    valorMin: z.coerce.number().nonnegative().optional()
   })
   .strict();
 
+export const objectIdSchema = z
+  .string()
+  .trim()
+  .regex(/^[0-9a-fA-F]{24}$/, 'Invalid document id')
+  .refine(ObjectId.isValid, 'Invalid document id');
+
 export const contratacaoParamsSchema = z.object({
-  id: z.string().refine(ObjectId.isValid, 'Invalid document id')
+  id: objectIdSchema
 });
 
 export type ListContratacoesQuery = z.infer<typeof listContratacoesQuerySchema>;

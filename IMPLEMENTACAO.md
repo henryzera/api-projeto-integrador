@@ -209,3 +209,310 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/contratacoes?limit=12" | jq '.d
 npm run typecheck   # zero erros de TypeScript
 npm run build       # gera dist/ sem erros
 ```
+
+## P0 — Correcoes de alinhamento ao MVP
+
+Esta secao documenta os ajustes P0 que aproximam a API do escopo do MVP:
+recuperacao de senha, filtro por faixa de valor, checklist correlacionado ao
+edital e traducao "mastigada" do detalhe.
+
+### Variaveis de ambiente novas
+
+| Variavel | Default | Descricao |
+| --- | --- | --- |
+| `MONGO_PASSWORD_RESETS_COLLECTION` | `password_resets` | Colecao que armazena os tokens de reset (hash + expiracao). Possui indice TTL em `expiresAt` e indice em `tokenHash`. |
+
+O indice e criado automaticamente no boot (`ensurePasswordResetIndexes` em `server.ts`).
+
+### Recuperacao de senha (sem e-mail)
+
+Projeto academico sem infraestrutura de e-mail. O token de reset e gerado com
+`crypto.randomBytes(32)`, armazenamos apenas o **hash SHA-256** na colecao
+`password_resets` com expiracao de **15 minutos**. Tokens anteriores do mesmo
+usuario sao invalidados a cada nova solicitacao. O token e sempre logado no nivel
+`info` (`password_reset_token_generated`) e, **apenas quando `NODE_ENV !== 'production'`**,
+tambem retornado no corpo da resposta (`resetToken`) para viabilizar o teste.
+
+Ambas as rotas usam o mesmo rate-limit das demais rotas de auth (20 req / 15 min).
+
+#### `POST /auth/forgot-password`
+
+Recebe e-mail OU CNPJ. Sempre responde `200` para nao vazar a existencia da conta.
+
+Request:
+
+```json
+{ "identifier": "empresa@exemplo.com" }
+```
+
+Response (`200`, em desenvolvimento):
+
+```json
+{
+  "message": "Se a conta existir, enviamos as instrucoes de redefinicao.",
+  "resetToken": "<token hex de 64 caracteres>",
+  "expiresInMinutes": 15
+}
+```
+
+Em producao o campo `resetToken` e omitido.
+
+#### `POST /auth/reset-password`
+
+Valida o token (hash + nao expirado), aplica a **mesma politica de senha forte do
+cadastro** (minimo 8 caracteres, com minuscula, maiuscula e numero), atualiza o
+hash bcrypt da senha do usuario e **consome** o token (deleta todos os resets do
+usuario).
+
+Request:
+
+```json
+{ "token": "<token recebido>", "newPassword": "NovaSenha123" }
+```
+
+Response (`200`):
+
+```json
+{ "message": "Senha redefinida com sucesso." }
+```
+
+Erros: `400` para token invalido/expirado e `400` para senha fraca (validacao Zod).
+
+### Filtro por faixa de valor em `GET /contratacoes`
+
+A listagem passa a aceitar `valorMin` e `valorMax` (numeros em R$, `>= 0`,
+opcionais). O filtro e aplicado em `valorTotalEstimado` (`$gte valorMin` /
+`$lte valorMax`) tanto na consulta ao MongoDB quanto no recorte dos dados de seed.
+Os filtros existentes (`modalidadeNome`, `cnae`, `uf`, `municipio`, `status`,
+`meOnly`, `q`) e a ordenacao por compatibilidade continuam funcionando.
+
+Exemplo:
+
+```bash
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "$BASE/contratacoes?valorMin=50000&valorMax=120000" | jq '.data[].valorTotalEstimado'
+```
+
+### Checklist correlacionado ao edital
+
+O checklist deixou de usar 5 itens fixos. Agora os itens de habilitacao sao
+derivados da contratacao por `buildHabilitacaoItems` (`src/utils/checklistBuilder.ts`):
+
+- **Base (sempre):** `cnpj-ativo`, `regularidade-federal`, `fgts`, `cndt`.
+- **Pregao/eletronico** (modalidade contem "Pregao"/"Eletron"): adiciona
+  `proposta-eletronica` (required).
+- **Valor alto (> R$ 80.000) ou objeto de servico/obra/manutencao:** adiciona
+  `atestado-tecnico` (required).
+- **Nao exclusivo ME/EPP:** adiciona `declaracao-mei` (required).
+- **Sempre opcional:** `portfolio` (required: false).
+
+IDs estaveis em kebab-case. O shape de `PublicChecklist` permanece inalterado
+(`{ contratacaoId, participationStatus, items[{id,label,checked,required}], updatedAt }`).
+Os itens ja marcados pelo usuario sao preservados via merge por `id`, e novos
+itens derivados do edital aparecem automaticamente. O campo `documentosExigidos`
+do detalhe usa os mesmos labels (`buildRequiredDocuments` deriva de
+`buildHabilitacaoItems`), garantindo consistencia entre detalhe e checklist.
+
+### Novos campos no detalhe (`GET /contratacoes/:id`)
+
+`toContratacaoDetail` passa a retornar (alem dos campos ja existentes como
+`requisitos` e `datasImportantes`):
+
+- **`resumoSimplificado: string[]`** — 3 a 6 frases em linguagem simples:
+  objeto da compra, explicacao da modalidade (glossario com fallback generico),
+  amparo legal explicado (Lei 14.133/2021), prazo de encerramento humanizado
+  ("Voce tem cerca de X dias...") e valor estimado formatado em R$.
+- **`elegibilidade: { exclusivaMeEpp, dentroLimiteMei, mensagem }`** —
+  `exclusivaMeEpp` true quando `exclusivaMeEpp`/`exclusivoME`/tratamento
+  diferenciado indicar ME/EPP; `dentroLimiteMei` true quando
+  `valorTotalEstimado <= 81000`; `mensagem` orienta o MEI ("Compativel com seu
+  porte" ou "Acima do limite do MEI, avalie como ME/EPP...").
+
+### Como testar (curl)
+
+```bash
+BASE="http://localhost:3000"
+
+# 1. Solicitar reset (dev retorna resetToken no corpo)
+RESET=$(curl -s -X POST "$BASE/auth/forgot-password" \
+  -H 'Content-Type: application/json' \
+  -d '{"identifier":"empresa@exemplo.com"}')
+echo "$RESET" | jq
+TOKEN_RESET=$(echo "$RESET" | jq -r '.resetToken')
+
+# 2. Redefinir a senha
+curl -s -X POST "$BASE/auth/reset-password" \
+  -H 'Content-Type: application/json' \
+  -d "{\"token\":\"$TOKEN_RESET\",\"newPassword\":\"NovaSenha123\"}" | jq
+
+# 3. Filtro por faixa de valor
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "$BASE/contratacoes?valorMin=50000&valorMax=120000" | jq '.data[].valorTotalEstimado'
+
+# 4. Detalhe com resumo simplificado e elegibilidade
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/contratacoes/$ID" \
+  | jq '{resumoSimplificado, elegibilidade, documentosExigidos, requisitos}'
+
+# 5. Checklist correlacionado ao edital
+curl -s -H "Authorization: Bearer $TOKEN" "$BASE/contratacoes/$ID/checklist" \
+  | jq '.items[] | {id, label, required}'
+```
+
+## PLANO-MVP — Execução (Backend)
+
+Esta seção documenta as mudanças do PLANO-MVP aplicadas no backend
+(`api-projeto-integrador`). Todas as alterações respeitam as convenções
+existentes (camadas controller→service→repository, validação com Zod via o
+middleware `validateRequest`, `asyncHandler` nas rotas, coleções via `env.*`).
+
+### 1.2 — Match de compatibilidade efetivo
+
+**`src/utils/contratacaoCompatibility.ts`**
+
+- O mapa de palavras-chave por prefixo CNAE (2 dígitos) foi ampliado de ~9 para
+  ~55 divisões, cobrindo agropecuária, indústria/fabricação, construção,
+  comércio (atacado/varejo/veículos), transporte/logística, alimentação/
+  hospedagem, TI/telecom/informação, serviços profissionais (jurídico,
+  engenharia, consultoria, publicidade), administrativo/apoio (limpeza,
+  vigilância, locação, RH), educação, saúde, cultura e serviços pessoais. Cada
+  categoria traz uma lista de sinônimos.
+- Todo o texto (objeto da compra, modalidade, órgão, unidade, município,
+  informação complementar) e as palavras-chave são normalizados (minúsculas +
+  remoção de acentos) antes do matching por substring.
+- **Nova fórmula do score (0–100):**
+  - Sem CNAE informado → `50` (neutro: não há como inferir aderência).
+  - CNAE informado mas com prefixo não mapeado → `50` (sem vocabulário).
+  - CNAE informado e mapeado → `score = 35 + min(matches * 13, 65)`, onde
+    `matches` é o número de palavras-chave da categoria encontradas no texto.
+    Com ≥ 5 termos o score satura em 100; com 0 termos fica em 35 (CNAE
+    conhecido, sem sinal de aderência).
+  - **Removidos** os bônus antigos de `+5 por situação divulgada` e
+    `+5 por ter data de encerramento` — eram sinais de estado/disponibilidade
+    do edital, não de compatibilidade com a atividade econômica.
+- A assinatura `calculateCompatibilityScore(contratacao, cnae?)` foi mantida.
+
+**`src/services/contratacoes.service.ts` — ordenação ANTES de paginar**
+
+- Antes a ordenação por score acontecia depois da paginação (reordenava só a
+  página). Agora `listContratacoes` busca um **POOL** de candidatos do filtro via
+  `findContratacoesPool(filter, compatibilityPoolLimit)` (ordenados por data no
+  Mongo), calcula o score de cada um, ordena DESC por score (desempate por
+  `dataEncerramentoProposta` mais próxima e depois `numeroCompra`) e só então
+  aplica `skip`/`limit` sobre o pool ordenado.
+- `total` reflete a contagem real do filtro (`countContratacoes`), independente
+  do pool.
+- **Limitação do teto do pool:** `compatibilityPoolLimit = 300`. A ordenação por
+  compatibilidade é exata apenas dentro dos primeiros 300 candidatos (ordenados
+  por data). Itens além desse teto não concorrem na ordenação por score, embora
+  apareçam na contagem `total`. O caminho de seed (banco vazio) foi mantido.
+
+### 2.1 — Validação das rotas `/contratacoes`
+
+- `src/routes/contratacoes.routes.ts` agora usa o mesmo middleware
+  `validateRequest` das demais rotas:
+  - `GET /` → `validateRequest({ query: listContratacoesQuerySchema })`.
+  - `GET /:id`, `GET /:id/checklist`, `PUT /:id/checklist` → validam `params`
+    com `contratacaoParamsSchema` (que usa o novo `objectIdSchema`).
+  - `PUT /:id/checklist` valida também o `body` com `updateChecklistSchema`.
+- Novo `objectIdSchema` em `src/schemas/contratacoes.schemas.ts`: valida ObjectId
+  de 24 hex (regex `^[0-9a-fA-F]{24}$` + `ObjectId.isValid`). ID inválido agora
+  retorna **400** (antes podia chegar a 500 via `new ObjectId(id)`).
+- Os controllers (`contratacoes.controller.ts`, `checklist.controller.ts`)
+  deixaram de fazer `.parse()` interno — leem `req.query`/`req.params`/`req.body`
+  já validados pelo middleware, evitando dupla validação inconsistente.
+
+### 2.2 — Índices na coleção de contratações
+
+- Novo `ensureContratacoesIndexes()` em
+  `src/repositories/contratacoes.repository.ts`, criando índices em:
+  `dataEncerramentoProposta`, `valorTotalEstimado`, `unidadeOrgao.ufSigla` e um
+  índice de **TEXTO** (`contratacoes_text`) sobre `objetoCompra`,
+  `modalidadeNome`, `situacaoCompraNome`, `orgaoEntidade.razaoSocial`,
+  `unidadeOrgao.nomeUnidade`, `unidadeOrgao.municipioNome`.
+- Registrado no boot (`src/server.ts`) junto dos demais `ensure*Indexes`. Como a
+  coleção é populada por serviço externo (ETL), a criação é **tolerante a
+  falha**: cada índice é criado em `try/catch` e qualquer erro é logado
+  (`contratacoes_index_failed` / `contratacoes_text_index_failed`) sem derrubar
+  o boot. No `server.ts` os `ensure*Indexes` rodam com `Promise.allSettled`.
+
+### 2.4 — Alertas melhores
+
+- `src/services/alert.service.ts`:
+  - **Removido o teto fixo de 50** contratações. Agora buscamos um pool maior
+    (`alertPoolLimit = 300`) via `findContratacoesPool`, aplicando filtro de
+    relevância no Mongo por UF do usuário quando disponível
+    (`buildRelevanceFilter`) e filtro por compatibilidade de CNAE em memória.
+  - Alertas de prazo (`buildProposalAlertRecords`) só são gerados para editais
+    com compatibilidade ≥ `proposalRelevanceThreshold` (50); avisos de novos
+    editais compatíveis (`buildCompatibleNoticeAlertRecords`) usam limiar 60.
+  - Ambas as gerações foram extraídas como **funções puras testáveis** (recebem
+    a lista de contratações, `userId`, `cnae` e `now`).
+  - **Datas em UTC explícito:** `parseDate` agora interpreta strings de
+    data-hora sem timezone (ex.: `2026-06-12T10:00:00`, comuns do ETL/PNCP) como
+    UTC (sufixo `Z`), evitando ambiguidade com o timezone do servidor. Strings
+    com TZ explícito (`Z` ou `±HH:MM`) são respeitadas.
+  - **Idempotência** mantida via `sourceKey` (`proposal:<id>`,
+    `compatible:<id>`, `document:<id>`) + upsert em `upsertAlertBySourceKey`.
+
+### 2.5 — Boot resiliente sem Mongo
+
+- `src/server.ts`: o `app.listen` agora sobe **independentemente** da conexão
+  com o Mongo. Se a conexão inicial falhar, logamos `mongodb_initial_connection_failed`
+  e agendamos reconexão em background (`scheduleMongoReconnect`, a cada 5s, com
+  `unref()` para não segurar o processo). Não há mais `exit(1)` por falha de
+  conexão inicial.
+- `src/database/mongo.ts`: `getMongoCollection` retorna rápido se já há conexão;
+  caso contrário tenta (re)conectar uma vez e, ao falhar, lança
+  `AppError(503, 'Database temporarily unavailable...')` — tratado pelo
+  `errorHandler` como resposta amigável, em vez de derrubar o processo.
+- `/health` continua reportando `mongo: connected | disconnected` via `pingMongo`.
+- O caminho de seed (coleção vazia, mas conectada) foi preservado.
+
+### 3.2 — CORS restritivo em produção
+
+- `src/app.ts`: se `NODE_ENV === 'production'` **e** `CORS_ORIGIN === '*'`,
+  emitimos um aviso proeminente no log (`cors_insecure_wildcard_in_production`)
+  orientando a configurar `CORS_ORIGIN` com a lista de origens confiáveis.
+  Optou-se por **avisar** (não recusar boot) para não quebrar o deploy atual.
+
+### 3.3 — Recuperação de senha por e-mail (plugável)
+
+- Novas variáveis **opcionais** em `src/config/env.ts`: `SMTP_HOST`, `SMTP_PORT`,
+  `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE` (`true|false`) e
+  `PASSWORD_RESET_URL_BASE`.
+- Novo `src/services/email.service.ts` (usa `nodemailer`): `isEmailEnabled()`
+  (true quando HOST/PORT/USER/PASS/FROM estão presentes), `sendEmail()` e
+  `buildPasswordResetLink()`.
+- `src/services/auth.service.ts#requestPasswordReset`: se o SMTP estiver
+  configurado, envia o link (ou o token, se `PASSWORD_RESET_URL_BASE` não estiver
+  definido) por e-mail. Caso o e-mail seja enviado com sucesso, o `resetToken`
+  **não** é retornado na resposta. Sem SMTP, mantém o **fallback** atual
+  (retorna `resetToken` apenas fora de produção + log). Endpoints inalterados.
+
+### 3.1 — Testes automatizados
+
+- Adicionados **Vitest + Supertest** como devDependencies. `npm test` agora roda
+  `vitest run` (placeholder removido); `npm run test:watch` para modo watch.
+- Config em `vitest.config.ts` (ambiente node, `tests/setup.ts` define env vars
+  mínimas para `src/config/env.ts` validar sem DB real).
+- Cobertura (`tests/`):
+  - `compatibility.test.ts` — `calculateCompatibilityScore` (sem CNAE, CNAE não
+    mapeado, piso 35, boost por matches, teto 100, faixa 0–100).
+  - `alert.test.ts` — funções puras de alertas (`buildProposalAlertRecords`,
+    `buildCompatibleNoticeAlertRecords`, limiar de compatibilidade, janela de
+    prazo, cap de 10, idempotência via `sourceKey`), `buildRelevanceFilter` e
+    `parseDate` (UTC explícito).
+  - `contratacoes.route.test.ts` — Supertest na rota real: 401 sem token e
+    **400** em `GET /contratacoes/:id` com id inválido (mockando o repositório
+    de tokens revogados para não exigir Mongo).
+
+**Como rodar os testes:**
+
+```bash
+cd api-projeto-integrador
+npm test          # roda toda a suíte uma vez (vitest run)
+npm run test:watch # modo watch
+```
+
+Os testes não exigem um MongoDB real — o acesso ao banco é mockado onde
+necessário e as funções de domínio testadas são puras.

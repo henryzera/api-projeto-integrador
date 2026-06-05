@@ -9,7 +9,7 @@ import type {
 } from '../models/checklist.model';
 import { findChecklist, upsertChecklist } from '../repositories/checklist.repository';
 import type { UpdateChecklistInput } from '../schemas/checklist.schemas';
-import { buildRequiredDocuments } from '../utils/checklistDefaults';
+import { buildHabilitacaoItems } from '../utils/checklistBuilder';
 import { getContratacaoById } from './contratacoes.service';
 
 const defaultParticipationStatus: ParticipationStatus = 'preparing';
@@ -19,15 +19,19 @@ export async function getChecklist(
   contratacaoId: string,
   userCnae?: string
 ): Promise<PublicChecklist> {
-  await getContratacaoById(contratacaoId, userCnae);
+  const contratacao = await getContratacaoById(contratacaoId, userCnae);
+  const derivedItems = buildDefaultItems(contratacao);
 
   const existing = await findChecklist(userId, contratacaoId);
 
   if (existing) {
-    return serializeChecklist(existing);
+    return serializeChecklist({
+      ...existing,
+      items: mergeChecklistItems(derivedItems, existing.items)
+    });
   }
 
-  return buildDefaultPublicChecklist(contratacaoId);
+  return buildDefaultPublicChecklist(contratacaoId, derivedItems);
 }
 
 export async function updateChecklist(
@@ -36,12 +40,13 @@ export async function updateChecklist(
   payload: UpdateChecklistInput,
   userCnae?: string
 ): Promise<PublicChecklist> {
-  await getContratacaoById(contratacaoId, userCnae);
+  const contratacao = await getContratacaoById(contratacaoId, userCnae);
+  const derivedItems = buildDefaultItems(contratacao);
 
   const existing = await findChecklist(userId, contratacaoId);
   const now = new Date();
 
-  const baseItems = existing ? existing.items : buildDefaultItems();
+  const baseItems = existing ? mergeChecklistItems(derivedItems, existing.items) : derivedItems;
   const baseStatus = existing ? existing.participationStatus : defaultParticipationStatus;
   const createdAt = existing ? existing.createdAt : now;
 
@@ -77,20 +82,36 @@ function applyItemsPatch(
   );
 }
 
-function buildDefaultItems(): ChecklistItem[] {
-  return buildRequiredDocuments().map((label, index) => ({
-    id: `doc-${index + 1}`,
-    label,
+function buildDefaultItems(contratacao: Record<string, unknown>): ChecklistItem[] {
+  return buildHabilitacaoItems(contratacao).map((item) => ({
+    id: item.id,
+    label: item.label,
     checked: false,
-    required: true
+    required: item.required
   }));
 }
 
-function buildDefaultPublicChecklist(contratacaoId: string): PublicChecklist {
+function mergeChecklistItems(
+  derivedItems: ChecklistItem[],
+  storedItems: ChecklistItem[]
+): ChecklistItem[] {
+  const storedById = new Map(storedItems.map((item) => [item.id, item]));
+
+  return derivedItems.map((item) => {
+    const stored = storedById.get(item.id);
+
+    return stored ? { ...item, checked: stored.checked } : item;
+  });
+}
+
+function buildDefaultPublicChecklist(
+  contratacaoId: string,
+  derivedItems: ChecklistItem[]
+): PublicChecklist {
   return {
     contratacaoId,
     participationStatus: defaultParticipationStatus,
-    items: buildDefaultItems(),
+    items: derivedItems,
     updatedAt: new Date().toISOString()
   };
 }

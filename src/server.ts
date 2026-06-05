@@ -2,33 +2,90 @@ import { Server } from 'http';
 
 import app from './app';
 import { env } from './config/env';
-import { closeMongo, connectMongo } from './database/mongo';
+import { closeMongo, connectMongo, isMongoConnected } from './database/mongo';
 import { ensureAlertIndexes } from './repositories/alert.repository';
 import { ensureChecklistIndexes } from './repositories/checklist.repository';
+import { ensureContratacoesIndexes } from './repositories/contratacoes.repository';
 import { ensureDocumentIndexes } from './repositories/document.repository';
+import { ensurePasswordResetIndexes } from './repositories/password-reset.repository';
 import { ensureRevokedTokenIndexes } from './repositories/revoked-token.repository';
 import { ensureUserIndexes } from './repositories/user.repository';
 import { logger } from './utils/logger';
 
 let server: Server;
 let isShuttingDown = false;
+let reconnectTimer: NodeJS.Timeout | null = null;
 
-async function startServer() {
-  await connectMongo();
-  await Promise.all([
+const mongoReconnectDelayMs = 5000;
+
+async function ensureIndexes(): Promise<void> {
+  // ensureContratacoesIndexes ja e tolerante a falha internamente (colecao
+  // populada por servico externo). As demais usam Promise.allSettled para que
+  // a falha de uma nao bloqueie as outras nem derrube o boot.
+  const results = await Promise.allSettled([
     ensureAlertIndexes(),
     ensureChecklistIndexes(),
+    ensureContratacoesIndexes(),
     ensureDocumentIndexes(),
+    ensurePasswordResetIndexes(),
     ensureRevokedTokenIndexes(),
     ensureUserIndexes()
   ]);
 
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      logger.warn('ensure_indexes_failed', { error: result.reason });
+    }
+  }
+}
+
+async function initMongo(): Promise<void> {
+  try {
+    await connectMongo();
+    await ensureIndexes();
+
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
+  } catch (error) {
+    logger.error('mongodb_initial_connection_failed', { error });
+    scheduleMongoReconnect();
+  }
+}
+
+function scheduleMongoReconnect(): void {
+  if (isShuttingDown || reconnectTimer || isMongoConnected()) {
+    return;
+  }
+
+  reconnectTimer = setTimeout(() => {
+    reconnectTimer = null;
+    logger.info('mongodb_reconnect_attempt');
+    void initMongo();
+  }, mongoReconnectDelayMs);
+
+  // Nao manter o processo vivo apenas por causa do timer de reconexao.
+  reconnectTimer.unref?.();
+}
+
+function startHttpServer(): void {
   server = app.listen(env.PORT, () => {
     logger.info('server_started', {
       environment: env.NODE_ENV,
+      mongo: isMongoConnected() ? 'connected' : 'disconnected',
       port: env.PORT
     });
   });
+}
+
+async function startServer() {
+  // Boot resiliente: subimos o HTTP server independentemente do Mongo. Se a
+  // conexao inicial falhar, /health reporta mongo: disconnected e tentamos
+  // reconectar em background. As rotas que dependem do banco retornam erro
+  // tratado (5xx amigavel) em vez de derrubar o processo.
+  startHttpServer();
+  await initMongo();
 }
 
 async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
@@ -38,6 +95,11 @@ async function gracefulShutdown(signal: NodeJS.Signals): Promise<void> {
 
   isShuttingDown = true;
   logger.info('shutdown_started', { signal });
+
+  if (reconnectTimer) {
+    clearTimeout(reconnectTimer);
+    reconnectTimer = null;
+  }
 
   const forcedShutdown = setTimeout(() => {
     logger.error('shutdown_forced');

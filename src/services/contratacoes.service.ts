@@ -2,7 +2,7 @@ import { AppError } from '../errors/AppError';
 import {
   countContratacoes,
   findContratacaoById,
-  findContratacoes
+  findContratacoesPool
 } from '../repositories/contratacoes.repository';
 import type { ListContratacoesQuery } from '../schemas/contratacoes.schemas';
 import { buildRequiredDocuments } from '../utils/checklistDefaults';
@@ -10,47 +10,54 @@ import { calculateCompatibilityScore } from '../utils/contratacaoCompatibility';
 
 const meiEppEstimatedValueLimit = 81_000;
 
+// Teto do POOL de candidatos buscados do filtro para ordenar por compatibilidade
+// ANTES de paginar. Limitacao MVP documentada: a ordenacao por compatibilidade so
+// e exata dentro dos primeiros `compatibilityPoolLimit` candidatos (ordenados por
+// data no Mongo). Acima desse teto, itens fora do pool nao concorrem na ordenacao
+// por score, embora `total` continue refletindo a contagem real do filtro.
+const compatibilityPoolLimit = 300;
+
 export async function listContratacoes(input: ListContratacoesQuery, userCnae?: string) {
   const filter = buildContratacoesFilter(input);
   const cnae = input.cnae ?? userCnae;
 
-  const [total, data] = await Promise.all([
+  const [total, pool] = await Promise.all([
     countContratacoes(filter),
-    findContratacoes(filter, {
-      limit: input.limit,
-      skip: input.skip
-    })
+    findContratacoesPool(filter, compatibilityPoolLimit)
   ]);
 
   if (total === 0 && (await countContratacoes({})) === 0) {
+    // Caminho de seed (banco vazio): mantemos o comportamento atual, ordenando e
+    // paginando sobre os dados de seed.
     const seedData = filterSeedContratacoes(input);
+    const orderedSeed = sortByCompatibility(
+      seedData.map((contratacao) => toContratacaoListItem(contratacao, cnae)),
+      cnae
+    );
 
     return {
       total: seedData.length,
       limit: input.limit,
       skip: input.skip,
-      data: sortByCompatibility(
-        seedData.slice(input.skip, input.skip + input.limit).map((contratacao) => toContratacaoListItem(contratacao, cnae)),
-        cnae
-      )
+      data: orderedSeed.slice(input.skip, input.skip + input.limit)
     };
   }
+
+  // Ordena o POOL inteiro por compatibilidade ANTES de paginar e so entao aplica
+  // skip/limit sobre o pool ordenado.
+  const orderedPool = sortByCompatibility(
+    pool.map((contratacao) => toContratacaoListItem(contratacao, cnae)),
+    cnae
+  );
 
   return {
     total,
     limit: input.limit,
     skip: input.skip,
-    data: sortByCompatibility(
-      data.map((contratacao) => toContratacaoListItem(contratacao, cnae)),
-      cnae
-    )
+    data: orderedPool.slice(input.skip, input.skip + input.limit)
   };
 }
 
-// NOTE (limitacao MVP): a ordenacao por compatibilidade e aplicada apos a busca
-// paginada, ou seja, reordena apenas os itens da pagina atual e nao o dataset
-// completo. Quando ha um CNAE disponivel, ordenamos por compatibilityScore DESC,
-// com desempate por dataEncerramentoProposta (mais proxima primeiro) e numeroCompra.
 type ContratacaoListItem = ReturnType<typeof toContratacaoListItem>;
 
 function sortByCompatibility(items: ContratacaoListItem[], cnae?: string): ContratacaoListItem[] {
@@ -143,6 +150,20 @@ function buildContratacoesFilter(input: ListContratacoesQuery): Record<string, u
 
   if (input.status ?? input.situacaoCompraNome) {
     filter.situacaoCompraNome = buildCaseInsensitiveRegex(input.status ?? input.situacaoCompraNome ?? '');
+  }
+
+  if (input.valorMin !== undefined || input.valorMax !== undefined) {
+    const valorFilter: Record<string, number> = {};
+
+    if (input.valorMin !== undefined) {
+      valorFilter.$gte = input.valorMin;
+    }
+
+    if (input.valorMax !== undefined) {
+      valorFilter.$lte = input.valorMax;
+    }
+
+    filter.valorTotalEstimado = valorFilter;
   }
 
   if (input.q) {
@@ -241,11 +262,13 @@ function toContratacaoDetail(contratacao: Record<string, unknown>, cnae?: string
       publicacaoPncp: contratacao.dataPublicacaoPncp ?? null,
       ultimaAtualizacao: contratacao.dataAtualizacaoGlobal ?? contratacao.dataAtualizacao ?? null
     },
-    documentosExigidos: buildRequiredDocuments(),
+    documentosExigidos: buildRequiredDocuments(contratacao),
+    elegibilidade: buildElegibilidade(contratacao),
     linkOficial: linksOficiais[0]?.url ?? null,
     linksOficiais,
     municipioNome,
     requisitos: buildRequirements(contratacao),
+    resumoSimplificado: buildResumoSimplificado(contratacao),
     statusOportunidade: getStatusOportunidade(contratacao),
     uf: ufSigla ? String(ufSigla).toLowerCase() : null,
     valorEstimado: contratacao.valorTotalEstimado ?? contratacao.valorTotalHomologado ?? null
@@ -306,6 +329,153 @@ function buildRequirements(contratacao: Record<string, unknown>): string[] {
     .map((value) => value.trim());
 
   return requirements.length > 0 ? requirements : ['Consultar edital e termo de referencia no link oficial'];
+}
+
+const modalidadeGlossario: Array<{ keywords: string[]; descricao: string }> = [
+  {
+    keywords: ['pregao'],
+    descricao:
+      'Pregao eletronico: a disputa acontece online e vence quem oferecer o menor preco dentro das regras do edital.'
+  },
+  {
+    keywords: ['dispensa'],
+    descricao:
+      'Dispensa eletronica: compra de menor valor com processo simplificado; o orgao seleciona a proposta mais vantajosa.'
+  },
+  {
+    keywords: ['concorrencia'],
+    descricao:
+      'Concorrencia: modalidade para contratacoes de maior valor ou complexidade, com analise detalhada de propostas e habilitacao.'
+  },
+  {
+    keywords: ['inexigibilidade'],
+    descricao:
+      'Inexigibilidade: contratacao direta quando ha fornecedor unico ou inviabilidade de competicao.'
+  },
+  {
+    keywords: ['leilao'],
+    descricao: 'Leilao: usado para venda de bens, vence quem oferecer o maior lance.'
+  },
+  {
+    keywords: ['concurso'],
+    descricao: 'Concurso: escolha de trabalho tecnico, cientifico ou artistico mediante premiacao.'
+  }
+];
+
+function describeModalidade(modalidadeNome: string): string {
+  const normalized = normalizeSimpleText(modalidadeNome);
+  const match = modalidadeGlossario.find((entry) =>
+    entry.keywords.some((keyword) => normalized.includes(keyword))
+  );
+
+  if (match) {
+    return match.descricao;
+  }
+
+  return modalidadeNome
+    ? `Modalidade ${modalidadeNome}: consulte o edital para entender as regras de participacao e julgamento.`
+    : 'Modalidade nao informada: consulte o edital para entender as regras de participacao.';
+}
+
+function humanizeDeadline(value: unknown): string | null {
+  const deadline = parseDate(value);
+
+  if (!deadline) {
+    return null;
+  }
+
+  const formatted = new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  }).format(deadline);
+  const diffDays = Math.ceil((deadline.getTime() - Date.now()) / (24 * 60 * 60 * 1000));
+
+  if (deadline.getTime() < Date.now()) {
+    return `O prazo para envio de proposta encerrou em ${formatted}.`;
+  }
+
+  if (diffDays <= 0) {
+    return `O prazo para envio de proposta encerra hoje (${formatted}). Corra!`;
+  }
+
+  if (diffDays === 1) {
+    return `O prazo para envio de proposta encerra amanha (${formatted}).`;
+  }
+
+  return `Voce tem cerca de ${diffDays} dias para enviar a proposta (encerra em ${formatted}).`;
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('pt-BR', {
+    currency: 'BRL',
+    style: 'currency'
+  }).format(value);
+}
+
+function buildResumoSimplificado(contratacao: Record<string, unknown>): string[] {
+  const resumo: string[] = [];
+  const objeto = typeof contratacao.objetoCompra === 'string' ? contratacao.objetoCompra.trim() : '';
+
+  if (objeto) {
+    resumo.push(`O que o orgao quer contratar: ${objeto}.`);
+  }
+
+  const modalidadeNome = typeof contratacao.modalidadeNome === 'string' ? contratacao.modalidadeNome.trim() : '';
+  resumo.push(describeModalidade(modalidadeNome));
+
+  resumo.push(
+    'Amparo legal: este processo segue a Lei 14.133/2021, a Nova Lei de Licitacoes, que define como o governo compra de empresas privadas de forma transparente.'
+  );
+
+  const deadlineText = humanizeDeadline(contratacao.dataEncerramentoProposta);
+
+  if (deadlineText) {
+    resumo.push(deadlineText);
+  }
+
+  const valor = Number(contratacao.valorTotalEstimado ?? contratacao.valorTotalHomologado ?? 0);
+
+  if (valor > 0) {
+    resumo.push(`Valor estimado da contratacao: ${formatCurrency(valor)}.`);
+  }
+
+  return resumo;
+}
+
+function buildElegibilidade(contratacao: Record<string, unknown>): {
+  exclusivaMeEpp: boolean;
+  dentroLimiteMei: boolean;
+  mensagem: string;
+} {
+  const tratamento = normalizeSimpleText(
+    typeof contratacao.tratamentoDiferenciado === 'string' ? contratacao.tratamentoDiferenciado : ''
+  );
+  const exclusivaMeEpp =
+    contratacao.exclusivaMeEpp === true ||
+    contratacao.exclusivoME === true ||
+    tratamento.includes('me') ||
+    tratamento.includes('epp');
+  const valor = Number(contratacao.valorTotalEstimado ?? contratacao.valorTotalHomologado ?? 0);
+  const dentroLimiteMei = valor <= meiEppEstimatedValueLimit;
+  const mensagem = dentroLimiteMei
+    ? 'Compativel com seu porte: o valor esta dentro do limite anual do MEI.'
+    : 'Acima do limite do MEI, avalie como ME/EPP ou em sociedade para participar.';
+
+  return {
+    dentroLimiteMei,
+    exclusivaMeEpp,
+    mensagem
+  };
+}
+
+function normalizeSimpleText(value: string): string {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 }
 
 function getStatusOportunidade(contratacao: Record<string, unknown>): string {
@@ -403,6 +573,16 @@ function filterSeedContratacoes(input: ListContratacoesQuery): Array<Record<stri
     }
 
     if (input.meOnly && Number(contratacao.valorTotalEstimado ?? 0) >= meiEppEstimatedValueLimit) {
+      return false;
+    }
+
+    const valorEstimado = Number(contratacao.valorTotalEstimado ?? 0);
+
+    if (input.valorMin !== undefined && valorEstimado < input.valorMin) {
+      return false;
+    }
+
+    if (input.valorMax !== undefined && valorEstimado > input.valorMax) {
       return false;
     }
 

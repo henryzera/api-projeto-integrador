@@ -9,7 +9,7 @@ const nameSchema = z
   .max(80)
   .regex(/^[\p{L}\s.'-]+$/u, 'Name contains invalid characters');
 
-const passwordSchema = z
+export const passwordSchema = z
   .string()
   .min(8)
   .max(128)
@@ -46,5 +46,20 @@ export const loginSchema = z
   })
   .strict();
 
+export const forgotPasswordSchema = z
+  .object({
+    identifier: z.string().trim().min(3).max(255)
+  })
+  .strict();
+
+export const resetPasswordSchema = z
+  .object({
+    newPassword: passwordSchema,
+    token: z.string().trim().min(1).max(256)
+  })
+  .strict();
+
 export type LoginInput = z.infer<typeof loginSchema>;
 export type RegisterInput = z.infer<typeof registerSchema>;
+export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
+export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
