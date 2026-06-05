@@ -4,6 +4,7 @@ import app from './app';
 import { env } from './config/env';
 import { closeMongo, connectMongo } from './database/mongo';
 import { ensureAlertIndexes } from './repositories/alert.repository';
+import { ensureChecklistIndexes } from './repositories/checklist.repository';
 import { ensureDocumentIndexes } from './repositories/document.repository';
 import { ensureRevokedTokenIndexes } from './repositories/revoked-token.repository';
 import { ensureUserIndexes } from './repositories/user.repository';
@@ -16,6 +17,7 @@ async function startServer() {
   await connectMongo();
   await Promise.all([
     ensureAlertIndexes(),
+    ensureChecklistIndexes(),
     ensureDocumentIndexes(),
     ensureRevokedTokenIndexes(),
     ensureUserIndexes()

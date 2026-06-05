@@ -5,6 +5,7 @@ import {
   findContratacoes
 } from '../repositories/contratacoes.repository';
 import type { ListContratacoesQuery } from '../schemas/contratacoes.schemas';
+import { buildRequiredDocuments } from '../utils/checklistDefaults';
 import { calculateCompatibilityScore } from '../utils/contratacaoCompatibility';
 
 const meiEppEstimatedValueLimit = 81_000;
@@ -28,7 +29,10 @@ export async function listContratacoes(input: ListContratacoesQuery, userCnae?: 
       total: seedData.length,
       limit: input.limit,
       skip: input.skip,
-      data: seedData.slice(input.skip, input.skip + input.limit).map((contratacao) => toContratacaoListItem(contratacao, cnae))
+      data: sortByCompatibility(
+        seedData.slice(input.skip, input.skip + input.limit).map((contratacao) => toContratacaoListItem(contratacao, cnae)),
+        cnae
+      )
     };
   }
 
@@ -36,8 +40,58 @@ export async function listContratacoes(input: ListContratacoesQuery, userCnae?: 
     total,
     limit: input.limit,
     skip: input.skip,
-    data: data.map((contratacao) => toContratacaoListItem(contratacao, cnae))
+    data: sortByCompatibility(
+      data.map((contratacao) => toContratacaoListItem(contratacao, cnae)),
+      cnae
+    )
   };
+}
+
+// NOTE (limitacao MVP): a ordenacao por compatibilidade e aplicada apos a busca
+// paginada, ou seja, reordena apenas os itens da pagina atual e nao o dataset
+// completo. Quando ha um CNAE disponivel, ordenamos por compatibilityScore DESC,
+// com desempate por dataEncerramentoProposta (mais proxima primeiro) e numeroCompra.
+type ContratacaoListItem = ReturnType<typeof toContratacaoListItem>;
+
+function sortByCompatibility(items: ContratacaoListItem[], cnae?: string): ContratacaoListItem[] {
+  if (!cnae) {
+    return items;
+  }
+
+  return [...items].sort((a, b) => {
+    const scoreDiff = (b.compatibilityScore ?? 0) - (a.compatibilityScore ?? 0);
+
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+
+    const deadlineDiff = compareDeadlines(a.dataEncerramentoProposta, b.dataEncerramentoProposta);
+
+    if (deadlineDiff !== 0) {
+      return deadlineDiff;
+    }
+
+    return String(a.numeroCompra ?? '').localeCompare(String(b.numeroCompra ?? ''));
+  });
+}
+
+function compareDeadlines(a: unknown, b: unknown): number {
+  const dateA = parseDate(a);
+  const dateB = parseDate(b);
+
+  if (dateA && dateB) {
+    return dateA.getTime() - dateB.getTime();
+  }
+
+  if (dateA) {
+    return -1;
+  }
+
+  if (dateB) {
+    return 1;
+  }
+
+  return 0;
 }
 
 export async function getContratacaoById(id: string, userCnae?: string) {
@@ -239,16 +293,6 @@ function buildOfficialLinks(contratacao: Record<string, unknown>) {
     .filter((link): link is { label: string; type: string; url: string } => Boolean(link));
 
   return Array.from(new Map(links.map((link) => [link.url, link])).values());
-}
-
-function buildRequiredDocuments(): string[] {
-  return [
-    'CNPJ ativo e regular',
-    'Documento de habilitacao juridica da empresa',
-    'Regularidade fiscal federal, estadual e municipal quando aplicavel',
-    'Certificado de Regularidade do FGTS quando exigido',
-    'Atestado de capacidade tecnica quando previsto no edital'
-  ];
 }
 
 function buildRequirements(contratacao: Record<string, unknown>): string[] {

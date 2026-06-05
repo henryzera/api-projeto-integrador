@@ -11,6 +11,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32, 'JWT_SECRET must have at least 32 characters'),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
   MONGO_ALERTS_COLLECTION: z.string().default('user_alerts'),
+  MONGO_CHECKLISTS_COLLECTION: z.string().default('contratacao_checklists'),
   MONGO_COLLECTION: z.string().min(1),
   MONGO_CONNECT_RETRIES: z.coerce.number().int().min(1).default(5),
   MONGO_CONNECT_RETRY_DELAY_MS: z.coerce.number().int().min(100).default(2000),
