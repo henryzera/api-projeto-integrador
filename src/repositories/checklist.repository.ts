@@ -29,6 +29,14 @@ export async function findChecklistsByUser(userId: ObjectId): Promise<ChecklistW
   return checklists.find({ userId }).toArray();
 }
 
+// LGPD - direito ao esquecimento: remove todos os checklists do usuario.
+export async function deleteChecklistsByUser(userId: ObjectId): Promise<number> {
+  const checklists = await getChecklistCollection();
+  const result = await checklists.deleteMany({ userId });
+
+  return result.deletedCount;
+}
+
 export async function upsertChecklist(record: ChecklistRecord): Promise<ChecklistWithId> {
   const checklists = await getChecklistCollection();
 

@@ -54,6 +54,14 @@ export async function findAlerts(filter: Record<string, unknown>): Promise<Alert
   return alerts.find(filter).sort({ priority: 1, date: 1, createdAt: -1 }).toArray();
 }
 
+// LGPD - direito ao esquecimento: remove todos os alertas do usuario.
+export async function deleteAlertsByUser(userId: ObjectId): Promise<number> {
+  const alerts = await getAlertsCollection();
+  const result = await alerts.deleteMany({ userId });
+
+  return result.deletedCount;
+}
+
 export async function updateAlertStatus(
   userId: ObjectId,
   id: string,

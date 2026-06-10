@@ -20,6 +20,7 @@ beforeAll(async () => {
 
 function buildToken(): string {
   return signAccessToken({
+    acceptedTermsAt: new Date(),
     cnae: '6201500',
     cnpj: '12345678000190',
     createdAt: new Date(),

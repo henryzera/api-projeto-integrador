@@ -2,6 +2,10 @@ import type { ObjectId, WithId } from 'mongodb';
 
 export type UserDocument = {
   _id?: ObjectId;
+  // Data/hora de aceite dos termos de uso e politica de privacidade (LGPD:
+  // registro de consentimento). Opcional para compatibilidade com usuarios
+  // criados antes deste campo existir.
+  acceptedTermsAt?: Date | null;
   cnae: string;
   cnpj: string;
   createdAt: Date;
@@ -18,6 +22,7 @@ export type UserWithId = WithId<UserDocument>;
 
 export type PublicUser = {
   id: string;
+  acceptedTermsAt: Date | null;
   cnae: string;
   cnpj: string;
   createdAt: Date;

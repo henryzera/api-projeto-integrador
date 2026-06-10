@@ -55,6 +55,7 @@ export async function registerUser(input: RegisterInput): Promise<AuthResponse> 
   const now = new Date();
   const passwordHash = await bcrypt.hash(input.password, passwordHashRounds);
   const user = await createUser({
+    acceptedTermsAt: input.acceptTerms ? now : null,
     cnae: input.cnae,
     cnpj: input.cnpj,
     createdAt: now,

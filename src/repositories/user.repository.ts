@@ -66,3 +66,12 @@ export async function updateUserById(id: string, updates: Partial<UserDocument>)
     }
   );
 }
+
+// LGPD - direito ao esquecimento: remove o documento do usuario. Idempotente
+// (retorna false se ja nao existia).
+export async function deleteUserById(userId: ObjectId): Promise<boolean> {
+  const users = await getUsersCollection();
+  const result = await users.deleteOne({ _id: userId });
+
+  return result.deletedCount === 1;
+}

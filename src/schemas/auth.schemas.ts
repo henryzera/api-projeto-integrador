@@ -19,6 +19,10 @@ export const passwordSchema = z
 
 export const registerSchema = z
   .object({
+    // Aceite dos termos/politica de privacidade (LGPD: registro de
+    // consentimento). Opcional para nao quebrar o frontend atual; quando
+    // presente e `true`, gravamos a data de aceite em acceptedTermsAt.
+    acceptTerms: z.boolean().optional(),
     cnae: z
       .string()
       .transform(onlyDigits)

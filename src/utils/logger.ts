@@ -1,3 +1,5 @@
+import { maskSensitiveMeta } from './maskSensitive';
+
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 type LogMeta = Record<string, unknown>;
@@ -24,11 +26,14 @@ function writeLog(level: LogLevel, message: string, meta?: LogMeta): void {
     return;
   }
 
+  // Mascaramos PII/segredos de forma centralizada antes de serializar. Assim,
+  // qualquer chamada de log (requestLogger, errorHandler, services) fica
+  // protegida contra vazamento de e-mail, CNPJ, tokens e senhas nos logs.
   const entry = {
     level,
     message,
     timestamp: new Date().toISOString(),
-    ...(meta ? { meta } : {})
+    ...(meta ? { meta: maskSensitiveMeta(meta) as LogMeta } : {})
   };
 
   const output = JSON.stringify(entry, (_key, value) => {

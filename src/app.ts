@@ -6,10 +6,12 @@ import helmet from 'helmet';
 import { env } from './config/env';
 import { meController, updateMeController } from './controllers/auth.controller';
 import { getMeDashboardController } from './controllers/dashboard.controller';
+import { deleteMeController, exportMyDataController } from './controllers/profile.controller';
 import { requireAuth } from './middlewares/auth.middleware';
 import { errorHandler } from './middlewares/errorHandler';
 import { createRateLimiter } from './middlewares/rateLimiter';
 import { requestLogger } from './middlewares/requestLogger';
+import { sanitizeMongo } from './middlewares/sanitizeMongo';
 import { validateRequest } from './middlewares/validateRequest';
 import alertRoutes from './routes/alert.routes';
 import authRoutes from './routes/auth.routes';
@@ -44,6 +46,12 @@ app.use(compression());
 app.use(cors({ origin: corsOrigins }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.urlencoded({ extended: false, limit: '100kb' }));
+// Sanitizacao anti-NoSQL-injection: remove operadores Mongo ($, .) de body,
+// params e query antes de qualquer handler. Defesa em profundidade junto da
+// validacao Zod. Vide src/middlewares/sanitizeMongo.ts.
+app.use(sanitizeMongo);
+// Rate limit GLOBAL (disponibilidade / anti-abuso) aplicado a todas as rotas.
+// As rotas de /auth tem limiters adicionais mais estritos.
 app.use(
   createRateLimiter({
     limit: 300,
@@ -56,8 +64,12 @@ app.use(
 app.use('/health', healthRoutes);
 app.use('/auth', authRoutes);
 app.get('/me/dashboard', requireAuth, asyncHandler(getMeDashboardController));
+// LGPD: exportacao de dados (acesso/portabilidade) e exclusao de conta
+// (esquecimento). Vide src/services/profile.service.ts.
+app.get('/me/data-export', requireAuth, asyncHandler(exportMyDataController));
 app.get('/me', requireAuth, asyncHandler(meController));
 app.patch('/me', requireAuth, validateRequest({ body: updateMeSchema }), asyncHandler(updateMeController));
+app.delete('/me', requireAuth, asyncHandler(deleteMeController));
 app.use('/contratacoes', requireAuth, contratacoesRoutes);
 app.use('/documents', requireAuth, documentRoutes);
 app.use('/alerts', requireAuth, alertRoutes);

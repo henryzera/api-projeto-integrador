@@ -75,6 +75,14 @@ export async function updateDocumentById(
   );
 }
 
+// LGPD - direito ao esquecimento: remove todos os documentos do usuario.
+export async function deleteDocumentsByUser(userId: ObjectId): Promise<number> {
+  const documents = await getDocumentsCollection();
+  const result = await documents.deleteMany({ userId });
+
+  return result.deletedCount;
+}
+
 export async function deleteDocumentById(userId: ObjectId, id: string): Promise<boolean> {
   if (!ObjectId.isValid(id)) {
     return false;
